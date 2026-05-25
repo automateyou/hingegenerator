@@ -23,24 +23,33 @@
   .gen-btn:not(:disabled):hover{transform:translateY(-1px);box-shadow:0 14px 28px -12px rgba(139,31,94,.55);}
   .gen-btn:not(:disabled):active{transform:translateY(0) scale(.98);}
 
+  .chip{border:1px solid #e3e3e3;background:#fafafa;color:#3a3a3a;border-radius:999px;
+    padding:8px 14px;font-size:13.5px;font-family:'Hanken Grotesk',sans-serif;cursor:pointer;
+    transition:.15s;user-select:none;}
+  .chip:hover{border-color:#c9a3b8;background:#fff;}
+  .chip.sel{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .chip-x{margin-left:6px;opacity:.8;font-weight:600;}
+
+  /* mini scrolling demo (illustrative only) */
+  @keyframes miniScroll{
+    0%{transform:translateY(0);} 8%{transform:translateY(0);}
+    92%{transform:translateY(-50%);} 100%{transform:translateY(-50%);}
+  }
+  .mini-scroller{animation:miniScroll 14s linear infinite;will-change:transform;}
+  .mini-view:hover .mini-scroller{animation-play-state:paused;}
+
+  /* thick divider */
+  .thick-rule{border:none;height:5px;background:#161616;border-radius:3px;
+    max-width:760px;margin:26px auto 30px;}
+
+  /* drag + drop photo slots */
+  .pslot.dragover{outline:2px dashed var(--accent);outline-offset:2px;}
+  .pslot.dragging{opacity:.4;}
+
   @keyframes pop{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   @keyframes nudge{0%,100%{transform:translateX(0)}50%{transform:translateX(7px)}}
   .arrow-wrap{animation:nudge 1.8s ease-in-out infinite;}
   @media(max-width:880px){.arrow-wrap{transform:rotate(90deg);margin:6px 0;}}
-
-  /* auto-scrolling hinge profile */
-  @keyframes hingeScroll{
-    0%{transform:translateY(0);}
-    8%{transform:translateY(0);}
-    92%{transform:translateY(-50%);}
-    100%{transform:translateY(-50%);}
-  }
-  .hinge-scroller{animation:hingeScroll 22s linear infinite;will-change:transform;}
-  .hinge-viewport:hover .hinge-scroller{animation-play-state:paused;}
-  @media(prefers-reduced-motion:reduce){
-    .hinge-scroller{animation:none;}
-    .hinge-viewport{overflow-y:auto;}
-  }
 </style>
 </head>
 <body>
@@ -63,10 +72,18 @@ const PROMPT_QS = [
   "A shower thought I recently had",
 ];
 
+// Popular interest chips people can tap to add.
+const POPULAR_INTERESTS = [
+  "Live music", "Hiking", "Cooking", "Coffee", "Travel", "Reading",
+  "Photography", "Yoga", "Running", "Art", "Wine", "Dogs",
+  "Gaming", "Climbing", "Dancing", "Foodie", "Surfing", "Film",
+  "Artificial intelligence", "Gardening", "Cycling", "Thrifting",
+];
+
 // Build a charming sample profile locally from the user's inputs.
 // (See note at bottom of file about the live AI version.)
 function buildSampleProfile({ name, interests, style, extra }) {
-  const hb = interests.filter((h) => h.trim());
+  const hb = interests.filter((h) => h && h.trim());
   const first = hb[0] || "good conversation";
   const second = hb[1] || "long walks";
   const third = hb[2] || "trying new things";
@@ -109,26 +126,42 @@ function Label({ children, style }) {
 
 function HingeGenerator() {
   const [name, setName] = useState("");
-  const [photo, setPhoto] = useState(null);
-  const [interests, setInterests] = useState(["Artificial intelligence", "", "", "", ""]);
+  const [photos, setPhotos] = useState([]); // up to 6 data URLs
+  const [interests, setInterests] = useState([]); // selected interest strings
+  const [customInterest, setCustomInterest] = useState("");
   const [style, setStyle] = useState("");
   const [shots, setShots] = useState([]);
   const [extra, setExtra] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [profile, setProfile] = useState(null);
+  const [dragIdx, setDragIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
   const fileRef = useRef(null);
   const shotRef = useRef(null);
 
-  const filledInterests = interests.filter((h) => h.trim()).length;
-  const canGenerate = name.trim() && filledInterests >= 1 && style.trim();
+  const filledInterests = interests.length;
+  const canGenerate = name.trim() && filledInterests === 5 && style.trim();
 
   function onPhoto(e) {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => setPhoto(r.result);
-    r.readAsDataURL(f);
+    const files = Array.from(e.target.files || []);
+    files.forEach((f) => {
+      const r = new FileReader();
+      r.onload = () => setPhotos((prev) => (prev.length >= 6 ? prev : [...prev, r.result]));
+      r.readAsDataURL(f);
+    });
+  }
+  function removePhoto(i) {
+    setPhotos((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  function movePhoto(from, to) {
+    setPhotos((prev) => {
+      if (from == null || to == null || from === to || from >= prev.length) return prev;
+      const next = prev.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(Math.min(to, next.length), 0, moved);
+      return next;
+    });
   }
   function onShots(e) {
     Array.from(e.target.files || []).forEach((f) => {
@@ -137,8 +170,24 @@ function HingeGenerator() {
       r.readAsDataURL(f);
     });
   }
-  function setInterest(i, v) {
-    setInterests((prev) => prev.map((h, idx) => (idx === i ? v : h)));
+  function toggleInterest(label) {
+    setInterests((prev) => {
+      if (prev.includes(label)) return prev.filter((x) => x !== label);
+      if (prev.length >= 5) return prev; // cap at 5
+      return [...prev, label];
+    });
+  }
+  function addCustomInterest() {
+    const v = customInterest.trim();
+    if (!v) return;
+    setInterests((prev) => {
+      if (prev.includes(v) || prev.length >= 5) return prev;
+      return [...prev, v];
+    });
+    setCustomInterest("");
+  }
+  function removeInterest(label) {
+    setInterests((prev) => prev.filter((x) => x !== label));
   }
 
   function generate() {
@@ -169,12 +218,31 @@ function HingeGenerator() {
         </p>
       </header>
 
-      <div style={{ maxWidth: 720, margin: "0 auto 40px", textAlign: "center", color: "#555", fontSize: 15, lineHeight: 1.6 }}>
-        <strong style={{ color: "#161616" }}>How it works:</strong> Enter your name, upload one photo,
-        list five interests, and describe your fashion style. Optionally drop in screenshots of your
-        current Hinge app or any extra notes about yourself. The generator writes you a set of
-        Hinge-style prompts and lays them out as a profile that scrolls like the real app.
+      <div style={{ maxWidth: 860, margin: "0 auto 18px", display: "flex", flexWrap: "wrap", gap: 18, alignItems: "center", justifyContent: "center" }}>
+        <div style={{ flex: "1 1 380px", maxWidth: 520, color: "#555", fontSize: 15, lineHeight: 1.6 }}>
+          <strong style={{ color: "#161616" }}>How it works:</strong> Enter your name, upload six photos,
+          pick five interests, and describe your fashion style. Optionally drop in screenshots of your
+          current Hinge app or any extra notes about yourself. The generator writes you a set of
+          Hinge-style prompts and lays them out as a finished profile — like the one to the right.
+        </div>
+
+        {/* arrow */}
+        <div className="arrow-wrap" style={{ flex: "0 0 auto" }}>
+          <svg width="54" height="34" viewBox="0 0 64 40" fill="none">
+            <path d="M2 20 H56" stroke={ACCENT} strokeWidth="3.5" strokeLinecap="round" />
+            <path d="M42 7 L57 20 L42 33" stroke={ACCENT} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+          </svg>
+        </div>
+
+        {/* mini scrolling demo */}
+        <MiniDemo />
       </div>
+
+      <p style={{ textAlign: "center", color: "#888", fontSize: 14, margin: "0 auto 4px" }}>
+        Your finished profile appears below — static, full length, all six photos and three prompts.
+      </p>
+
+      <hr className="thick-rule" />
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "center" }}>
         {/* INPUT PANEL */}
@@ -182,24 +250,118 @@ function HingeGenerator() {
           <Label>Your name</Label>
           <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Maya" />
 
-          <Label style={{ marginTop: 20 }}>One photo of you</Label>
-          <div onClick={() => fileRef.current && fileRef.current.click()}
-            style={{ border: "1.5px dashed #d6d6d6", borderRadius: 14, padding: photo ? 8 : "26px 14px", textAlign: "center", cursor: "pointer", background: "#fafafa", color: "#888", fontSize: 14 }}>
-            {photo
-              ? <img src={photo} alt="you" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 9, display: "block" }} />
-              : <span>📷 Tap to upload a photo</span>}
+          <Label style={{ marginTop: 20 }}>
+            Your photos <span style={{ color: "#aaa", fontWeight: 400 }}>({photos.length}/6 · drag to reorder)</span>
+          </Label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+            {[0, 1, 2, 3, 4, 5].map((i) => {
+              const src = photos[i];
+              const isDragging = dragIdx === i;
+              const isOver = overIdx === i && dragIdx !== null && dragIdx !== i;
+              return (
+                <div
+                  key={i}
+                  className={"pslot" + (isDragging ? " dragging" : "") + (isOver ? " dragover" : "")}
+                  draggable={!!src}
+                  onDragStart={() => setDragIdx(i)}
+                  onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
+                  onDragOver={(e) => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); }}
+                  onDrop={(e) => { e.preventDefault(); movePhoto(dragIdx, i); setDragIdx(null); setOverIdx(null); }}
+                  onClick={() => { if (!src && photos.length < 6) fileRef.current && fileRef.current.click(); }}
+                  style={{
+                    position: "relative", aspectRatio: "4/5", borderRadius: 12, overflow: "hidden",
+                    border: src ? "1px solid #e3e3e3" : "1.5px dashed #d6d6d6",
+                    background: src ? `center/cover no-repeat url(${src})` : "#fafafa",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: src ? "grab" : "pointer", color: "#bbb", fontSize: 22,
+                  }}
+                >
+                  {!src && "＋"}
+                  {src && (
+                    <>
+                      <span style={{ position: "absolute", left: 5, top: 4, fontSize: 10, fontWeight: 700,
+                        color: "#fff", background: "rgba(0,0,0,.5)", borderRadius: 6, padding: "1px 6px" }}>
+                        {i + 1}
+                      </span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); removePhoto(i); }}
+                        style={{
+                          position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: "50%",
+                          background: "rgba(0,0,0,.55)", color: "#fff", fontSize: 12, display: "flex",
+                          alignItems: "center", justifyContent: "center", cursor: "pointer",
+                        }}
+                      >✕</span>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <input ref={fileRef} type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} />
+          <input ref={fileRef} type="file" accept="image/*" multiple onChange={onPhoto} style={{ display: "none" }} />
+
+          {/* Honest note about AI photo generation */}
+          <div style={{ marginTop: 10, fontSize: 12, color: "#999", lineHeight: 1.5, background: "#fafafa", border: "1px solid #efefef", borderRadius: 10, padding: "10px 12px" }}>
+            ✨ <strong style={{ color: "#777" }}>AI photo restyling</strong> (changing your outfit, generating new
+            shots) isn't available in this standalone version — generating images of a real person needs a
+            connected image-AI service running on a server. For now, upload your own photos and drag to reorder.
+          </div>
 
           <Label style={{ marginTop: 20 }}>
-            Five interests <span style={{ color: "#aaa", fontWeight: 400 }}>({filledInterests}/5)</span>
+            Type 5 interests here <span style={{ color: filledInterests === 5 ? "#2e7d32" : "#aaa", fontWeight: 400 }}>({filledInterests}/5)</span>
           </Label>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {interests.map((h, i) => (
-              <input key={i} className="field-input" value={h} onChange={(e) => setInterest(i, e.target.value)}
-                placeholder={["Artificial intelligence", "Live music", "Pottery", "Hiking", "Cooking"][i]} />
-            ))}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {POPULAR_INTERESTS.map((label) => {
+              const sel = interests.includes(label);
+              const atCap = filledInterests >= 5 && !sel;
+              return (
+                <span
+                  key={label}
+                  className={"chip" + (sel ? " sel" : "")}
+                  onClick={() => toggleInterest(label)}
+                  style={atCap ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+                >
+                  {label}
+                </span>
+              );
+            })}
           </div>
+
+          {/* custom entry */}
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <input
+              className="field-input"
+              value={customInterest}
+              onChange={(e) => setCustomInterest(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustomInterest(); } }}
+              placeholder={filledInterests >= 5 ? "5 interests added" : "Type your own here…"}
+              disabled={filledInterests >= 5}
+              style={{ flex: 1, opacity: filledInterests >= 5 ? 0.6 : 1 }}
+            />
+            <button
+              onClick={addCustomInterest}
+              disabled={!customInterest.trim() || filledInterests >= 5}
+              style={{
+                border: "1px solid #e3e3e3", borderRadius: 12, padding: "0 16px",
+                background: customInterest.trim() && filledInterests < 5 ? "#fff" : "#f6f6f6",
+                color: customInterest.trim() && filledInterests < 5 ? ACCENT : "#bbb",
+                fontWeight: 600, fontFamily: sans,
+                cursor: customInterest.trim() && filledInterests < 5 ? "pointer" : "default",
+              }}
+            >
+              Add
+            </button>
+          </div>
+
+          {/* selected interests (custom + popular) with remove */}
+          {interests.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+              {interests.map((label) => (
+                <span key={label} className="chip sel" onClick={() => removeInterest(label)}>
+                  {label}<span className="chip-x">✕</span>
+                </span>
+              ))}
+            </div>
+          )}
 
           <Label style={{ marginTop: 20 }}>Your fashion style</Label>
           <input className="field-input" value={style} onChange={(e) => setStyle(e.target.value)} placeholder="e.g. vintage thrift meets clean minimalist" />
@@ -241,13 +403,13 @@ function HingeGenerator() {
         </div>
 
         {/* PHONE */}
-        <Phone name={name || "Your name"} photo={photo} profile={profile} loading={loading} />
+        <Phone name={name || "Your name"} photos={photos} profile={profile} loading={loading} />
       </div>
     </div>
   );
 }
 
-function Phone({ name, photo, profile, loading }) {
+function Phone({ name, photos, profile, loading }) {
   return (
     <div style={{ flex: "0 0 300px", width: 300, background: "#fff", borderRadius: 30, border: "10px solid #111", overflow: "hidden", boxShadow: "0 30px 70px -30px rgba(0,0,0,.45)", position: "relative", paddingBottom: 16 }}>
       <div style={{ height: 30, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", fontSize: 12, fontWeight: 600 }}>
@@ -263,21 +425,14 @@ function Phone({ name, photo, profile, loading }) {
         <div style={{ flex: 1, color: "#161616", fontWeight: 600, borderBottom: "2px solid #161616", paddingBottom: 6, margin: "0 22px" }}>View</div>
       </div>
 
-      <div className="hinge-viewport" style={{ height: 470, overflow: "hidden", position: "relative",
-        maskImage: "linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 14px), transparent 100%)",
-        WebkitMaskImage: "linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 14px), transparent 100%)" }}>
+      <div style={{ height: 470, overflowY: "auto" }}>
         {loading && <div style={{ padding: 22, color: "#999", fontSize: 14 }}>Writing your profile…</div>}
         {!loading && !profile && (
           <div style={{ padding: 22, color: "#bbb", fontSize: 14, lineHeight: 1.5 }}>
-            Fill in the form and hit <em>Generate</em> — your scrolling profile will appear here.
+            Fill in the form and hit <em>Generate</em> — your profile will appear here.
           </div>
         )}
-        {!loading && profile && (
-          <div className="hinge-scroller">
-            <ProfileBody name={name} photo={photo} profile={profile} />
-            <ProfileBody name={name} photo={photo} profile={profile} ariaHidden />
-          </div>
-        )}
+        {!loading && profile && <ProfileBody name={name} photos={photos} profile={profile} />}
       </div>
 
       <div style={{ position: "absolute", bottom: 7, left: "50%", transform: "translateX(-50%)", width: 90, height: 4, borderRadius: 3, background: "#111", opacity: 0.85, zIndex: 3 }} />
@@ -285,34 +440,120 @@ function Phone({ name, photo, profile, loading }) {
   );
 }
 
-function ProfileBody({ name, photo, profile, ariaHidden }) {
+function PhotoSlot({ src, n }) {
   return (
-    <div aria-hidden={ariaHidden ? "true" : undefined}>
-      <div style={{ width: "100%", aspectRatio: "1/1.05", background: photo ? `center/cover no-repeat url(${photo})` : "linear-gradient(150deg,#e9b894,#8b1f5e)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
-        {!photo && <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", border: "1px solid rgba(255,255,255,.6)", padding: "6px 12px", borderRadius: 20 }}>your photo</span>}
-      </div>
+    <div style={{ width: "100%", aspectRatio: "1/1.05", background: src ? `center/cover no-repeat url(${src})` : "linear-gradient(150deg,#e9b894,#8b1f5e)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+      {!src && <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", border: "1px solid rgba(255,255,255,.6)", padding: "6px 12px", borderRadius: 20 }}>{"photo " + n}</span>}
+    </div>
+  );
+}
 
-      {profile && profile.vitals && (
+function PromptCard({ q, a }) {
+  return (
+    <div style={{ padding: "18px 18px 20px", borderTop: "1px solid #f0f0f0" }}>
+      <div style={{ fontSize: 13, color: "#3a3a3a", marginBottom: 9 }}>{q}</div>
+      <div style={{ fontFamily: serif, fontSize: 20, lineHeight: 1.28, fontWeight: 800, letterSpacing: "-.3px", fontVariationSettings: "'opsz' 60" }}>{a}</div>
+    </div>
+  );
+}
+
+function ProfileBody({ name, photos, profile }) {
+  // Always show 6 photo slots and 3 prompts, interleaved like the real Hinge layout.
+  const pics = [0, 1, 2, 3, 4, 5].map((i) => (photos && photos[i]) || null);
+  const prompts = (profile && profile.prompts ? profile.prompts : []).slice(0, 3);
+  const v = profile && profile.vitals;
+
+  return (
+    <div>
+      {/* Photo 1 */}
+      <PhotoSlot src={pics[0]} n={1} />
+
+      {/* Vitals */}
+      {v && (
         <div style={{ padding: "14px 18px 4px" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 14px", fontSize: 13.5, color: "#1c1c1c", paddingBottom: 8 }}>
-            {profile.vitals.age && <span>◍ {profile.vitals.age}</span>}
-            {profile.vitals.height && <span>▯ {profile.vitals.height}</span>}
-            {profile.vitals.location && <span>📍 {profile.vitals.location}</span>}
+            {v.age && <span>◍ {v.age}</span>}
+            {v.height && <span>▯ {v.height}</span>}
+            {v.location && <span>📍 {v.location}</span>}
           </div>
-          {profile.vitals.job && (
+          {v.job && (
             <div style={{ fontSize: 14, color: "#1c1c1c", padding: "12px 0", borderTop: "1px solid #f0f0f0", display: "flex", gap: 10 }}>
-              <span style={{ opacity: 0.6 }}>✦</span>{profile.vitals.job}
+              <span style={{ opacity: 0.6 }}>✦</span>{v.job}
             </div>
           )}
         </div>
       )}
 
-      {profile && profile.prompts && profile.prompts.map((p, i) => (
-        <div key={i} style={{ padding: "18px 18px 20px", borderTop: "1px solid #f0f0f0" }}>
-          <div style={{ fontSize: 13, color: "#3a3a3a", marginBottom: 9 }}>{p.q}</div>
-          <div style={{ fontFamily: serif, fontSize: 20, lineHeight: 1.28, fontWeight: 800, letterSpacing: "-.3px", fontVariationSettings: "'opsz' 60" }}>{p.a}</div>
+      {/* Prompt 1 */}
+      {prompts[0] && <PromptCard q={prompts[0].q} a={prompts[0].a} />}
+      {/* Photo 2 */}
+      <PhotoSlot src={pics[1]} n={2} />
+      {/* Prompt 2 */}
+      {prompts[1] && <PromptCard q={prompts[1].q} a={prompts[1].a} />}
+      {/* Photo 3 */}
+      <PhotoSlot src={pics[2]} n={3} />
+      {/* Photo 4 */}
+      <PhotoSlot src={pics[3]} n={4} />
+      {/* Prompt 3 */}
+      {prompts[2] && <PromptCard q={prompts[2].q} a={prompts[2].a} />}
+      {/* Photo 5 */}
+      <PhotoSlot src={pics[4]} n={5} />
+      {/* Photo 6 */}
+      <PhotoSlot src={pics[5]} n={6} />
+    </div>
+  );
+}
+
+function MiniDemo() {
+  const demo = {
+    name: "Jordan",
+    vitals: { age: "28", height: `5' 10"`, location: "Brooklyn" },
+    prompts: [
+      { q: "My simple pleasures", a: "Vinyl records and the perfect espresso." },
+      { q: "Together, we could", a: "Get lost in a new city with no plan." },
+      { q: "I go crazy for", a: "Someone who can make me laugh mid-argument." },
+    ],
+  };
+  const grads = [
+    "linear-gradient(150deg,#3a3f52,#171a24)",
+    "linear-gradient(150deg,#9c7a3c,#5e4a22)",
+    "linear-gradient(150deg,#c14b86,#7a2b54)",
+    "linear-gradient(150deg,#3f5a3a,#22311f)",
+  ];
+  const Body = () => (
+    <div>
+      <div style={{ width: "100%", aspectRatio: "1/1", background: grads[0] }} />
+      <div style={{ padding: "8px 10px 2px", fontSize: 9, color: "#1c1c1c", display: "flex", gap: 8 }}>
+        <span>◍ {demo.vitals.age}</span><span>▯ {demo.vitals.height}</span><span>📍 {demo.vitals.location}</span>
+      </div>
+      {demo.prompts.map((p, i) => (
+        <div key={i}>
+          <div style={{ padding: "8px 10px", borderTop: "1px solid #f0f0f0" }}>
+            <div style={{ fontSize: 8, color: "#3a3a3a", marginBottom: 3 }}>{p.q}</div>
+            <div style={{ fontFamily: serif, fontSize: 12, fontWeight: 800, lineHeight: 1.2, letterSpacing: "-.2px" }}>{p.a}</div>
+          </div>
+          <div style={{ width: "100%", aspectRatio: "1/1", background: grads[(i + 1) % grads.length] }} />
         </div>
       ))}
+    </div>
+  );
+  return (
+    <div style={{ flex: "0 0 auto", width: 132, background: "#fff", borderRadius: 18, border: "5px solid #111", overflow: "hidden", boxShadow: "0 18px 40px -22px rgba(0,0,0,.5)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 9px", fontSize: 8, fontWeight: 700 }}>
+        <span>11:53</span><span>▂▄▆ 📶 🔋</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 9px 4px", alignItems: "center" }}>
+        <span style={{ color: ACCENT, fontSize: 8 }}>Cancel</span>
+        <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 11 }}>{demo.name}</span>
+        <span style={{ color: ACCENT, fontSize: 8 }}>Done</span>
+      </div>
+      <div className="mini-view" style={{ height: 188, overflow: "hidden", position: "relative",
+        maskImage: "linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%)",
+        WebkitMaskImage: "linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%)" }}>
+        <div className="mini-scroller">
+          <Body /><Body />
+        </div>
+      </div>
     </div>
   );
 }
