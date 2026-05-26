@@ -38,10 +38,6 @@
   .mini-scroller{animation:miniScroll 14s linear infinite;will-change:transform;}
   .mini-view:hover .mini-scroller{animation-play-state:paused;}
 
-  /* thick divider */
-  .thick-rule{border:none;height:5px;background:#161616;border-radius:3px;
-    max-width:760px;margin:26px auto 30px;}
-
   /* drag + drop photo slots */
   .pslot.dragover{outline:2px dashed var(--accent);outline-offset:2px;}
   .pslot.dragging{opacity:.4;}
@@ -84,33 +80,49 @@ const POPULAR_INTERESTS = [
 // (See note at bottom of file about the live AI version.)
 function buildSampleProfile({ name, interests, style, extra }) {
   const hb = interests.filter((h) => h && h.trim());
+  const hasInterests = hb.length > 0;
   const first = hb[0] || "good conversation";
   const second = hb[1] || "long walks";
-  const third = hb[2] || "trying new things";
-  const styled = style.trim() || "my own thing";
+  const third = hb[2] || "a spontaneous road trip";
+  const styled = style.trim() || "effortless and a little classic";
 
-  const answers = [
+  // Tailored answers when interests exist; clean generic ones when they don't.
+  const tailored = [
     `Tell me the time and place. Skip the small talk — bonus points if it involves ${first.toLowerCase()}.`,
     `${second}, the first coffee of the day, and a wardrobe that's all ${styled.toLowerCase()}.`,
     `Anyone who can hold a real conversation about ${first.toLowerCase()} and still laugh at themselves.`,
     `Turn a slow Sunday into something good — I'll bring the ${third.toLowerCase()}, you bring the playlist.`,
     `Equal parts ${first.toLowerCase()} deep-dives and showing up exactly when I say I will.`,
+  ];
+  const generic = [
+    `Tell me the time and place — I'm better in person than over text anyway.`,
+    `A good coffee, a long walk, and a conversation that loses track of time.`,
+    `Someone who's genuinely curious and can laugh at themselves.`,
+    `Find the best hole-in-the-wall spot in town and make it our regular.`,
+    `Showing up, being honest, and remembering the little things you mention.`,
+  ];
+  const base = hasInterests ? tailored : generic;
+  const answers = base.concat([
     extra.trim()
       ? `Honestly? ${extra.trim().split(/[.!?]/)[0]}.`
-      : `If ${first.toLowerCase()} ever becomes sentient, I'm taking full credit.`,
-  ];
+      : `Ask me anything — I'm an open book.`,
+  ]);
 
   const prompts = PROMPT_QS.slice(0, 5).map((q, i) => ({ q, a: answers[i] }));
 
   return {
-    tagline: `${name || "Someone"} — into ${hb.slice(0, 2).join(" & ") || "lots of things"}.`,
+    tagline: hasInterests
+      ? `${name || "Someone"} — into ${hb.slice(0, 2).join(" & ")}.`
+      : `${name || "Someone"} — here for something real.`,
     vitals: {
       age: "29",
       height: "5' 8\"",
       location: "Oakland, CA",
       job: hb.includes("Artificial intelligence")
         ? "AI researcher"
-        : `Into ${first.toLowerCase()}`,
+        : hasInterests
+        ? `Into ${first.toLowerCase()}`
+        : "Always up for a good plan",
     },
     prompts,
   };
@@ -137,19 +149,24 @@ function HingeGenerator() {
   const [profile, setProfile] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
+  const [zoneOver, setZoneOver] = useState(false);
+  const [lightbox, setLightbox] = useState(null); // {src, n}
   const fileRef = useRef(null);
   const shotRef = useRef(null);
 
   const filledInterests = interests.length;
-  const canGenerate = name.trim() && filledInterests === 5 && style.trim();
+  const canGenerate = name.trim() && photos.length >= 1 && filledInterests === 5 && style.trim();
 
-  function onPhoto(e) {
-    const files = Array.from(e.target.files || []);
+  function addPhotoFiles(files) {
     files.forEach((f) => {
       const r = new FileReader();
       r.onload = () => setPhotos((prev) => (prev.length >= 6 ? prev : [...prev, r.result]));
       r.readAsDataURL(f);
     });
+  }
+  function onPhoto(e) {
+    addPhotoFiles(Array.from(e.target.files || []));
+    e.target.value = ""; // allow re-selecting the same file
   }
   function removePhoto(i) {
     setPhotos((prev) => prev.filter((_, idx) => idx !== i));
@@ -192,6 +209,13 @@ function HingeGenerator() {
 
   function generate() {
     setError("");
+
+    // Only the name is required. Everything else falls back to generic content.
+    if (!name.trim()) {
+      window.alert("Please enter your name first.");
+      return;
+    }
+
     setLoading(true);
     setProfile(null);
     // Local generation (works anywhere). For the live AI version, see note at the
@@ -214,88 +238,107 @@ function HingeGenerator() {
           Hinge Generator
         </h1>
         <p style={{ color: "#6b6b6b", marginTop: 12, fontSize: 16 }}>
-          Drop in your details on the left — get a ready-made profile on the right.
+          Create a draft Hinge profile in 5 minutes. Either use your photos, or go shoot the photos in real life.
         </p>
       </header>
 
-      <div style={{ maxWidth: 860, margin: "0 auto 18px", display: "flex", flexWrap: "wrap", gap: 18, alignItems: "center", justifyContent: "center" }}>
-        <div style={{ flex: "1 1 380px", maxWidth: 520, color: "#555", fontSize: 15, lineHeight: 1.6 }}>
-          <strong style={{ color: "#161616" }}>How it works:</strong> Enter your name, upload six photos,
-          pick five interests, and describe your fashion style. Optionally drop in screenshots of your
-          current Hinge app or any extra notes about yourself. The generator writes you a set of
-          Hinge-style prompts and lays them out as a finished profile — like the one to the right.
-        </div>
+      <div style={{ maxWidth: 900, margin: "0 auto", background: "#faf7f9", border: "1px solid #f0e6ec", borderRadius: 28, padding: "26px 28px", boxShadow: "0 20px 50px -38px rgba(0,0,0,.3)" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "center", justifyContent: "center" }}>
+          <div style={{ flex: "1 1 360px", maxWidth: 500, color: "#555", fontSize: 15, lineHeight: 1.6 }}>
+            <strong style={{ color: "#161616" }}>How it works:</strong> Enter your name, upload at least one
+            photo (up to six), pick five interests, and describe your fashion style. Optionally drop in
+            screenshots of your current Hinge app or any extra notes about yourself. The generator writes
+            you a set of Hinge-style prompts and lays them out as a finished profile — like the one to the right.
+          </div>
 
-        {/* arrow */}
-        <div className="arrow-wrap" style={{ flex: "0 0 auto" }}>
-          <svg width="54" height="34" viewBox="0 0 64 40" fill="none">
-            <path d="M2 20 H56" stroke={ACCENT} strokeWidth="3.5" strokeLinecap="round" />
-            <path d="M42 7 L57 20 L42 33" stroke={ACCENT} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          </svg>
-        </div>
+          {/* arrow */}
+          <div className="arrow-wrap" style={{ flex: "0 0 auto" }}>
+            <svg width="54" height="34" viewBox="0 0 64 40" fill="none">
+              <path d="M2 20 H56" stroke={ACCENT} strokeWidth="3.5" strokeLinecap="round" />
+              <path d="M42 7 L57 20 L42 33" stroke={ACCENT} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </svg>
+          </div>
 
-        {/* mini scrolling demo */}
-        <MiniDemo />
+          {/* mini scrolling demo */}
+          <MiniDemo />
+        </div>
       </div>
 
-      <p style={{ textAlign: "center", color: "#888", fontSize: 14, margin: "0 auto 4px" }}>
-        Your finished profile appears below — static, full length, all six photos and three prompts.
-      </p>
+      {/* TRY IT HERE */}
+      <div style={{ textAlign: "center", margin: "30px auto 18px" }}>
+        <div style={{ fontFamily: serif, fontWeight: 900, fontSize: "clamp(40px,7vw,66px)", letterSpacing: "-1.4px", lineHeight: 0.95, color: "#161616", fontVariationSettings: "'opsz' 60" }}>
+          Try It Here
+        </div>
+        <div style={{ fontSize: 34, color: ACCENT, lineHeight: 1, marginTop: 6 }}>↓</div>
+      </div>
 
-      <hr className="thick-rule" />
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "center" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-start", justifyContent: "center" }}>
         {/* INPUT PANEL */}
         <div style={{ flex: "1 1 340px", maxWidth: 420, border: "1px solid #ededed", borderRadius: 22, padding: "26px 24px", boxShadow: "0 22px 50px -34px rgba(0,0,0,.3)" }}>
           <Label>Your name</Label>
           <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Maya" />
 
           <Label style={{ marginTop: 20 }}>
-            Your photos <span style={{ color: "#aaa", fontWeight: 400 }}>({photos.length}/6 · drag to reorder)</span>
+            Your photos <span style={{ color: "#aaa", fontWeight: 400 }}>({photos.length}/6)</span>
           </Label>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
-            {[0, 1, 2, 3, 4, 5].map((i) => {
-              const src = photos[i];
-              const isDragging = dragIdx === i;
-              const isOver = overIdx === i && dragIdx !== null && dragIdx !== i;
-              return (
-                <div
-                  key={i}
-                  className={"pslot" + (isDragging ? " dragging" : "") + (isOver ? " dragover" : "")}
-                  draggable={!!src}
-                  onDragStart={() => setDragIdx(i)}
-                  onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
-                  onDragOver={(e) => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); }}
-                  onDrop={(e) => { e.preventDefault(); movePhoto(dragIdx, i); setDragIdx(null); setOverIdx(null); }}
-                  onClick={() => { if (!src && photos.length < 6) fileRef.current && fileRef.current.click(); }}
-                  style={{
-                    position: "relative", aspectRatio: "4/5", borderRadius: 12, overflow: "hidden",
-                    border: src ? "1px solid #e3e3e3" : "1.5px dashed #d6d6d6",
-                    background: src ? `center/cover no-repeat url(${src})` : "#fafafa",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    cursor: src ? "grab" : "pointer", color: "#bbb", fontSize: 22,
-                  }}
-                >
-                  {!src && "＋"}
-                  {src && (
-                    <>
-                      <span style={{ position: "absolute", left: 5, top: 4, fontSize: 10, fontWeight: 700,
-                        color: "#fff", background: "rgba(0,0,0,.5)", borderRadius: 6, padding: "1px 6px" }}>
-                        {i + 1}
-                      </span>
-                      <span
-                        onClick={(e) => { e.stopPropagation(); removePhoto(i); }}
+          <div
+            onClick={() => { if (photos.length < 6) fileRef.current && fileRef.current.click(); }}
+            onDragOver={(e) => { e.preventDefault(); setZoneOver(true); }}
+            onDragLeave={() => setZoneOver(false)}
+            onDrop={(e) => {
+              e.preventDefault(); setZoneOver(false);
+              const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith("image/"));
+              addPhotoFiles(files);
+            }}
+            style={{
+              border: zoneOver ? `2px dashed ${ACCENT}` : "1.5px dashed #d6d6d6",
+              background: zoneOver ? "#fdf4f9" : "#fafafa",
+              borderRadius: 16, padding: photos.length ? 12 : "34px 16px",
+              textAlign: "center", cursor: photos.length < 6 ? "pointer" : "default", transition: ".15s",
+            }}
+          >
+            {photos.length === 0 ? (
+              <div style={{ color: "#888" }}>
+                <div style={{ fontSize: 30, marginBottom: 6 }}>📷</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#555" }}>Drop at least 1 photo, up to 6</div>
+                <div style={{ fontSize: 13, color: "#999", marginTop: 2 }}>tap or drag to drop</div>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+                  {photos.map((src, i) => {
+                    const isDragging = dragIdx === i;
+                    const isOver = overIdx === i && dragIdx !== null && dragIdx !== i;
+                    return (
+                      <div
+                        key={i}
+                        className={"pslot" + (isDragging ? " dragging" : "") + (isOver ? " dragover" : "")}
+                        draggable
+                        onClick={(e) => e.stopPropagation()}
+                        onDragStart={() => setDragIdx(i)}
+                        onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
+                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (overIdx !== i) setOverIdx(i); }}
+                        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); movePhoto(dragIdx, i); setDragIdx(null); setOverIdx(null); }}
                         style={{
-                          position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: "50%",
-                          background: "rgba(0,0,0,.55)", color: "#fff", fontSize: 12, display: "flex",
-                          alignItems: "center", justifyContent: "center", cursor: "pointer",
+                          position: "relative", aspectRatio: "4/5", borderRadius: 10, overflow: "hidden",
+                          border: "1px solid #e3e3e3", background: `center/cover no-repeat url(${src})`, cursor: "grab",
                         }}
-                      >✕</span>
-                    </>
+                      >
+                        <span style={{ position: "absolute", left: 5, top: 4, fontSize: 10, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,.5)", borderRadius: 6, padding: "1px 6px" }}>{i + 1}</span>
+                        <span
+                          onClick={(e) => { e.stopPropagation(); removePhoto(i); }}
+                          style={{ position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: "50%", background: "rgba(0,0,0,.55)", color: "#fff", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                        >✕</span>
+                      </div>
+                    );
+                  })}
+                  {photos.length < 6 && (
+                    <div style={{ aspectRatio: "4/5", borderRadius: 10, border: "1.5px dashed #d6d6d6", display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 24 }}>＋</div>
                   )}
                 </div>
-              );
-            })}
+                <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>tap to add more · drag to reorder</div>
+              </>
+            )}
           </div>
           <input ref={fileRef} type="file" accept="image/*" multiple onChange={onPhoto} style={{ display: "none" }} />
 
@@ -307,7 +350,7 @@ function HingeGenerator() {
           </div>
 
           <Label style={{ marginTop: 20 }}>
-            Type 5 interests here <span style={{ color: filledInterests === 5 ? "#2e7d32" : "#aaa", fontWeight: 400 }}>({filledInterests}/5)</span>
+            Select/Type 5 interests here <span style={{ color: filledInterests === 5 ? "#2e7d32" : "#aaa", fontWeight: 400 }}>({filledInterests}/5)</span>
           </Label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {POPULAR_INTERESTS.map((label) => {
@@ -364,7 +407,7 @@ function HingeGenerator() {
           )}
 
           <Label style={{ marginTop: 20 }}>Your fashion style</Label>
-          <input className="field-input" value={style} onChange={(e) => setStyle(e.target.value)} placeholder="e.g. vintage thrift meets clean minimalist" />
+          <input className="field-input" value={style} onChange={(e) => setStyle(e.target.value)} placeholder="e.g. classy" />
 
           <Label style={{ marginTop: 20 }}>
             Existing Hinge screenshots <span style={{ color: "#aaa", fontWeight: 400 }}>(optional)</span>
@@ -387,15 +430,15 @@ function HingeGenerator() {
             placeholder="Paste any text from your current Hinge profile, or anything else you'd want a match to know."
             style={{ resize: "vertical", fontFamily: sans }} />
 
-          <button className="gen-btn" disabled={!canGenerate || loading} onClick={generate}
-            style={{ marginTop: 26, width: "100%", border: "none", borderRadius: 999, padding: "15px", fontSize: 16, fontWeight: 600, fontFamily: sans, color: "#fff", background: canGenerate ? ACCENT : "#d9b8cb", cursor: canGenerate ? "pointer" : "not-allowed" }}>
+          <button className="gen-btn" disabled={loading} onClick={generate}
+            style={{ marginTop: 26, width: "100%", border: "none", borderRadius: 999, padding: "15px", fontSize: 16, fontWeight: 600, fontFamily: sans, color: "#fff", background: ACCENT, cursor: loading ? "default" : "pointer", opacity: loading ? 0.7 : 1 }}>
             {loading ? "Writing your profile…" : "Generate profile"}
           </button>
           {error && <div style={{ color: "#b3261e", fontSize: 13, marginTop: 10 }}>{error}</div>}
         </div>
 
         {/* ARROW */}
-        <div className="arrow-wrap" style={{ flex: "0 0 auto", padding: "0 6px" }}>
+        <div className="arrow-wrap" style={{ flex: "0 0 auto", padding: "0 6px", marginTop: 220 }}>
           <svg width="64" height="40" viewBox="0 0 64 40" fill="none">
             <path d="M2 20 H56" stroke={ACCENT} strokeWidth="3.5" strokeLinecap="round" />
             <path d="M42 7 L57 20 L42 33" stroke={ACCENT} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
@@ -403,13 +446,46 @@ function HingeGenerator() {
         </div>
 
         {/* PHONE */}
-        <Phone name={name || "Your name"} photos={photos} profile={profile} loading={loading} />
+        <Phone name={name || "Your name"} photos={photos} profile={profile} loading={loading} onPhotoClick={(src, n) => setLightbox({ src, n })} />
       </div>
+
+      {/* LIGHTBOX */}
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.82)", zIndex: 100, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}
+        >
+          <img
+            src={lightbox.src}
+            alt={"photo " + lightbox.n}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "min(92vw,520px)", maxHeight: "76vh", objectFit: "contain", borderRadius: 14, boxShadow: "0 30px 80px rgba(0,0,0,.6)" }}
+          />
+          <div style={{ display: "flex", gap: 12, marginTop: 18 }} onClick={(e) => e.stopPropagation()}>
+            <a
+              href={lightbox.src}
+              download={"hinge-photo-" + lightbox.n + ".jpg"}
+              style={{ background: ACCENT, color: "#fff", textDecoration: "none", fontWeight: 600, fontFamily: sans, padding: "12px 22px", borderRadius: 999, fontSize: 15 }}
+            >
+              ↓ Download
+            </a>
+            <button
+              onClick={() => setLightbox(null)}
+              style={{ background: "rgba(255,255,255,.15)", color: "#fff", border: "1px solid rgba(255,255,255,.4)", fontWeight: 600, fontFamily: sans, padding: "12px 22px", borderRadius: 999, fontSize: 15, cursor: "pointer" }}
+            >
+              Close
+            </button>
+          </div>
+          <div style={{ color: "rgba(255,255,255,.6)", fontSize: 12, marginTop: 12 }}>
+            Tip: you can also right-click the image and choose “Save image as…”
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function Phone({ name, photos, profile, loading }) {
+function Phone({ name, photos, profile, loading, onPhotoClick }) {
   return (
     <div style={{ flex: "0 0 300px", width: 300, background: "#fff", borderRadius: 30, border: "10px solid #111", overflow: "hidden", boxShadow: "0 30px 70px -30px rgba(0,0,0,.45)", position: "relative", paddingBottom: 16 }}>
       <div style={{ height: 30, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", fontSize: 12, fontWeight: 600 }}>
@@ -425,25 +501,37 @@ function Phone({ name, photos, profile, loading }) {
         <div style={{ flex: 1, color: "#161616", fontWeight: 600, borderBottom: "2px solid #161616", paddingBottom: 6, margin: "0 22px" }}>View</div>
       </div>
 
-      <div style={{ height: 470, overflowY: "auto" }}>
+      <div>
         {loading && <div style={{ padding: 22, color: "#999", fontSize: 14 }}>Writing your profile…</div>}
-        {!loading && !profile && (
-          <div style={{ padding: 22, color: "#bbb", fontSize: 14, lineHeight: 1.5 }}>
-            Fill in the form and hit <em>Generate</em> — your profile will appear here.
-          </div>
-        )}
-        {!loading && profile && <ProfileBody name={name} photos={photos} profile={profile} />}
+        {!loading && <ProfileBody name={name} photos={photos} profile={profile} onPhotoClick={onPhotoClick} />}
       </div>
 
+      <div style={{ height: 10 }} />
       <div style={{ position: "absolute", bottom: 7, left: "50%", transform: "translateX(-50%)", width: 90, height: 4, borderRadius: 3, background: "#111", opacity: 0.85, zIndex: 3 }} />
     </div>
   );
 }
 
-function PhotoSlot({ src, n }) {
+function PhotoSlot({ src, n, onPhotoClick }) {
   return (
-    <div style={{ width: "100%", aspectRatio: "1/1.05", background: src ? `center/cover no-repeat url(${src})` : "linear-gradient(150deg,#e9b894,#8b1f5e)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
-      {!src && <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", border: "1px solid rgba(255,255,255,.6)", padding: "6px 12px", borderRadius: 20 }}>{"photo " + n}</span>}
+    <div
+      onClick={() => { if (src && onPhotoClick) onPhotoClick(src, n); }}
+      style={{ width: "100%", aspectRatio: "1/1.05", background: src ? `center/cover no-repeat url(${src})` : "#fff", borderTop: src ? "none" : "1px solid #f0f0f0", borderBottom: src ? "none" : "1px solid #f0f0f0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", cursor: src ? "zoom-in" : "default", position: "relative" }}
+    >
+      {!src && (
+        <>
+          <svg width="62" height="62" viewBox="0 0 24 24" fill="none" stroke="#d2d2d2" strokeWidth="1.4" style={{ marginBottom: 4 }}>
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
+          </svg>
+          <span style={{ fontFamily: sans, fontSize: 30, fontWeight: 800, letterSpacing: "2px", color: "#cfcfcf" }}>PHOTO</span>
+        </>
+      )}
+      {src && (
+        <span style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,.5)", color: "#fff", fontSize: 11, padding: "3px 8px", borderRadius: 20 }}>
+          ⤢ tap to enlarge
+        </span>
+      )}
     </div>
   );
 }
@@ -457,49 +545,65 @@ function PromptCard({ q, a }) {
   );
 }
 
-function ProfileBody({ name, photos, profile }) {
+// Placeholder prompt questions shown in the empty outline (before generating).
+const OUTLINE_PROMPTS = [
+  { q: "The best way to ask me out is by", a: "Your answer will appear here…" },
+  { q: "My simple pleasures", a: "Your answer will appear here…" },
+  { q: "Together, we could", a: "Your answer will appear here…" },
+];
+
+function ProfileBody({ name, photos, profile, onPhotoClick }) {
   // Always show 6 photo slots and 3 prompts, interleaved like the real Hinge layout.
   const pics = [0, 1, 2, 3, 4, 5].map((i) => (photos && photos[i]) || null);
-  const prompts = (profile && profile.prompts ? profile.prompts : []).slice(0, 3);
-  const v = profile && profile.vitals;
+  const generated = !!(profile && profile.prompts);
+  const prompts = generated ? profile.prompts.slice(0, 3) : OUTLINE_PROMPTS;
+  const v = (profile && profile.vitals) || { age: "—", height: `—`, location: "Location", job: "Your headline" };
+  const ghost = !generated; // dim the placeholder text
+
+  const Pc = (p) => (
+    <div style={{ padding: "18px 18px 20px", borderTop: "1px solid #f0f0f0" }}>
+      <div style={{ fontSize: 13, color: "#3a3a3a", marginBottom: 9 }}>{p.q}</div>
+      <div style={{ fontFamily: serif, fontSize: 20, lineHeight: 1.28, fontWeight: 800, letterSpacing: "-.3px", fontVariationSettings: "'opsz' 60", color: ghost ? "#cfcfcf" : "#161616" }}>
+        {p.a}
+      </div>
+    </div>
+  );
 
   return (
     <div>
       {/* Photo 1 */}
-      <PhotoSlot src={pics[0]} n={1} />
+      <PhotoSlot src={pics[0]} n={1} onPhotoClick={onPhotoClick} />
 
       {/* Vitals */}
-      {v && (
-        <div style={{ padding: "14px 18px 4px" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 14px", fontSize: 13.5, color: "#1c1c1c", paddingBottom: 8 }}>
-            {v.age && <span>◍ {v.age}</span>}
-            {v.height && <span>▯ {v.height}</span>}
-            {v.location && <span>📍 {v.location}</span>}
-          </div>
-          {v.job && (
-            <div style={{ fontSize: 14, color: "#1c1c1c", padding: "12px 0", borderTop: "1px solid #f0f0f0", display: "flex", gap: 10 }}>
-              <span style={{ opacity: 0.6 }}>✦</span>{v.job}
-            </div>
-          )}
+      <div style={{ padding: "14px 18px 4px" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 14px", fontSize: 13.5, color: ghost ? "#c4c4c4" : "#1c1c1c", paddingBottom: 8 }}>
+          <span>◍ {v.age}</span>
+          <span>▯ {v.height}</span>
+          <span>📍 {v.location}</span>
         </div>
-      )}
+        {v.job && (
+          <div style={{ fontSize: 14, color: ghost ? "#c4c4c4" : "#1c1c1c", padding: "12px 0", borderTop: "1px solid #f0f0f0", display: "flex", gap: 10 }}>
+            <span style={{ opacity: 0.6 }}>✦</span>{v.job}
+          </div>
+        )}
+      </div>
 
       {/* Prompt 1 */}
-      {prompts[0] && <PromptCard q={prompts[0].q} a={prompts[0].a} />}
+      {Pc(prompts[0])}
       {/* Photo 2 */}
-      <PhotoSlot src={pics[1]} n={2} />
+      <PhotoSlot src={pics[1]} n={2} onPhotoClick={onPhotoClick} />
       {/* Prompt 2 */}
-      {prompts[1] && <PromptCard q={prompts[1].q} a={prompts[1].a} />}
+      {Pc(prompts[1])}
       {/* Photo 3 */}
-      <PhotoSlot src={pics[2]} n={3} />
+      <PhotoSlot src={pics[2]} n={3} onPhotoClick={onPhotoClick} />
       {/* Photo 4 */}
-      <PhotoSlot src={pics[3]} n={4} />
+      <PhotoSlot src={pics[3]} n={4} onPhotoClick={onPhotoClick} />
       {/* Prompt 3 */}
-      {prompts[2] && <PromptCard q={prompts[2].q} a={prompts[2].a} />}
+      {Pc(prompts[2])}
       {/* Photo 5 */}
-      <PhotoSlot src={pics[4]} n={5} />
+      <PhotoSlot src={pics[4]} n={5} onPhotoClick={onPhotoClick} />
       {/* Photo 6 */}
-      <PhotoSlot src={pics[5]} n={6} />
+      <PhotoSlot src={pics[5]} n={6} onPhotoClick={onPhotoClick} />
     </div>
   );
 }
@@ -514,15 +618,18 @@ function MiniDemo() {
       { q: "I go crazy for", a: "Someone who can make me laugh mid-argument." },
     ],
   };
-  const grads = [
-    "linear-gradient(150deg,#3a3f52,#171a24)",
-    "linear-gradient(150deg,#9c7a3c,#5e4a22)",
-    "linear-gradient(150deg,#c14b86,#7a2b54)",
-    "linear-gradient(150deg,#3f5a3a,#22311f)",
-  ];
+  const MiniPhoto = () => (
+    <div style={{ width: "100%", aspectRatio: "1/1", background: "#fff", borderTop: "1px solid #f0f0f0", borderBottom: "1px solid #f0f0f0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#d2d2d2" strokeWidth="1.4" style={{ marginBottom: 2 }}>
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
+      </svg>
+      <span style={{ fontFamily: sans, fontSize: 13, fontWeight: 800, letterSpacing: "1px", color: "#cfcfcf" }}>PHOTO</span>
+    </div>
+  );
   const Body = () => (
     <div>
-      <div style={{ width: "100%", aspectRatio: "1/1", background: grads[0] }} />
+      <MiniPhoto />
       <div style={{ padding: "8px 10px 2px", fontSize: 9, color: "#1c1c1c", display: "flex", gap: 8 }}>
         <span>◍ {demo.vitals.age}</span><span>▯ {demo.vitals.height}</span><span>📍 {demo.vitals.location}</span>
       </div>
@@ -532,7 +639,7 @@ function MiniDemo() {
             <div style={{ fontSize: 8, color: "#3a3a3a", marginBottom: 3 }}>{p.q}</div>
             <div style={{ fontFamily: serif, fontSize: 12, fontWeight: 800, lineHeight: 1.2, letterSpacing: "-.2px" }}>{p.a}</div>
           </div>
-          <div style={{ width: "100%", aspectRatio: "1/1", background: grads[(i + 1) % grads.length] }} />
+          <MiniPhoto />
         </div>
       ))}
     </div>
