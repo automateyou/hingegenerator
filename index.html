@@ -54,6 +54,11 @@
 <script type="text/babel">
 const { useState, useRef } = React;
 
+// Image backend. Empty = same origin (correct for Vercel, where the page and
+// /api/enhance are served from the same URL). For local Node testing set this
+// to "http://localhost:8787".
+const IMAGE_BACKEND = "";
+
 const serif = "'Source Serif 4', Georgia, serif";
 const sans = "'Hanken Grotesk', system-ui, sans-serif";
 const ACCENT = "#8b1f5e";
@@ -72,8 +77,8 @@ const PROMPT_QS = [
 const POPULAR_INTERESTS = [
   "Live music", "Hiking", "Cooking", "Coffee", "Travel", "Reading",
   "Photography", "Yoga", "Running", "Art", "Wine", "Dogs",
-  "Gaming", "Climbing", "Dancing", "Foodie", "Surfing", "Film",
-  "Artificial intelligence", "Gardening", "Cycling", "Thrifting",
+  "Gaming", "Climbing", "Dancing", "Foodie", "Movies",
+  "Artificial intelligence", "Cycling", "Thrifting",
 ];
 
 // Build a charming sample profile locally from the user's inputs.
@@ -171,6 +176,51 @@ function HingeGenerator() {
   function removePhoto(i) {
     setPhotos((prev) => prev.filter((_, idx) => idx !== i));
   }
+
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceError, setEnhanceError] = useState("");
+  const [enhanceProgress, setEnhanceProgress] = useState(0);
+  async function enhancePhotos() {
+    if (photos.length < 1) { setEnhanceError("Upload a photo first."); return; }
+    setEnhanceError("");
+    setEnhancing(true);
+    setEnhanceProgress(0);
+    const sourcePhoto = photos[0];
+    const STYLES = 5;
+    const got = [];
+    try {
+      // Call the function once per style (each generates one image) so it fits
+      // the serverless time limit. Style 0 = outfit change; styles 1+ = the
+      // person doing one of their selected interests.
+      for (let style = 0; style < STYLES; style++) {
+        const interest = style === 0 ? null : (interests[style - 1] || interests[0] || "");
+        const res = await fetch(IMAGE_BACKEND + "/api/enhance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ photo: sourcePhoto, style, interest }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j.error || ("Server returned " + res.status));
+        }
+        const { image } = await res.json();
+        if (image) {
+          got.push(image);
+          setEnhanceProgress(got.length);
+          // Fill slots as they arrive: style 0 replaces photo 1, others append.
+          setPhotos((prev) => {
+            const next = prev.slice();
+            if (style === 0) next[0] = image; else next.push(image);
+            return next.slice(0, 6);
+          });
+        }
+      }
+    } catch (e) {
+      setEnhanceError("Image generation failed: " + e.message);
+    } finally {
+      setEnhancing(false);
+    }
+  }
   function movePhoto(from, to) {
     setPhotos((prev) => {
       if (from == null || to == null || from === to || from >= prev.length) return prev;
@@ -209,20 +259,15 @@ function HingeGenerator() {
 
   function generate() {
     setError("");
-
-    // Only the name is required. Everything else falls back to generic content.
-    if (!name.trim()) {
-      window.alert("Please enter your name first.");
-      return;
-    }
-
+    // No fields are required anymore. Empty name falls back to "Nameless".
     setLoading(true);
     setProfile(null);
+    const finalName = name.trim() || "Nameless";
     // Local generation (works anywhere). For the live AI version, see note at the
     // bottom of this file — that requires running inside the Claude artifact runtime.
     setTimeout(() => {
       try {
-        setProfile(buildSampleProfile({ name, interests, style, extra }));
+        setProfile(buildSampleProfile({ name: finalName, interests, style, extra }));
       } catch (e) {
         setError("Couldn't build that one — give it another tap.");
       } finally {
@@ -275,8 +320,8 @@ function HingeGenerator() {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-start", justifyContent: "center" }}>
         {/* INPUT PANEL */}
         <div style={{ flex: "1 1 340px", maxWidth: 420, border: "1px solid #ededed", borderRadius: 22, padding: "26px 24px", boxShadow: "0 22px 50px -34px rgba(0,0,0,.3)" }}>
-          <Label>Your name</Label>
-          <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Maya" />
+          <Label>Your name <span style={{ color: "#aaa", fontWeight: 400 }}>(optional)</span></Label>
+          <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Leave blank for “Nameless”" />
 
           <Label style={{ marginTop: 20 }}>
             Your photos <span style={{ color: "#aaa", fontWeight: 400 }}>({photos.length}/6)</span>
@@ -342,12 +387,16 @@ function HingeGenerator() {
           </div>
           <input ref={fileRef} type="file" accept="image/*" multiple onChange={onPhoto} style={{ display: "none" }} />
 
-          {/* Honest note about AI photo generation */}
-          <div style={{ marginTop: 10, fontSize: 12, color: "#999", lineHeight: 1.5, background: "#fafafa", border: "1px solid #efefef", borderRadius: 10, padding: "10px 12px" }}>
-            ✨ <strong style={{ color: "#777" }}>AI photo restyling</strong> (changing your outfit, generating new
-            shots) isn't available in this standalone version — generating images of a real person needs a
-            connected image-AI service running on a server. For now, upload your own photos and drag to reorder.
-          </div>
+          {/* AI photo enhance (requires server.js running with your OpenAI key) */}
+          <button
+            onClick={enhancePhotos}
+            disabled={enhancing || photos.length < 1}
+            className="gen-btn"
+            style={{ marginTop: 10, width: "100%", border: "1px solid " + ACCENT, borderRadius: 999, padding: "12px", fontSize: 14, fontWeight: 600, fontFamily: sans, color: enhancing || photos.length < 1 ? "#bbb" : ACCENT, background: "#fff", cursor: enhancing || photos.length < 1 ? "default" : "pointer" }}
+          >
+            {enhancing ? `Enhancing… (${enhanceProgress}/5)` : "✨ Enhance my photos with AI"}
+          </button>
+          {enhanceError && <div style={{ color: "#b3261e", fontSize: 12, marginTop: 8, lineHeight: 1.4 }}>{enhanceError}</div>}
 
           <Label style={{ marginTop: 20 }}>
             Select/Type 5 interests here <span style={{ color: filledInterests === 5 ? "#2e7d32" : "#aaa", fontWeight: 400 }}>({filledInterests}/5)</span>
@@ -446,7 +495,7 @@ function HingeGenerator() {
         </div>
 
         {/* PHONE */}
-        <Phone name={name || "Your name"} photos={photos} profile={profile} loading={loading} onPhotoClick={(src, n) => setLightbox({ src, n })} />
+        <Phone name={name.trim() || "Nameless"} photos={photos} profile={profile} loading={loading} onPhotoClick={(src, n) => setLightbox({ src, n })} />
       </div>
 
       {/* LIGHTBOX */}
@@ -503,7 +552,7 @@ function Phone({ name, photos, profile, loading, onPhotoClick }) {
 
       <div>
         {loading && <div style={{ padding: 22, color: "#999", fontSize: 14 }}>Writing your profile…</div>}
-        {!loading && <ProfileBody name={name} photos={photos} profile={profile} onPhotoClick={onPhotoClick} />}
+        {!loading && <ProfileBody name={name} photos={[]} profile={profile} onPhotoClick={onPhotoClick} />}
       </div>
 
       <div style={{ height: 10 }} />
@@ -519,13 +568,7 @@ function PhotoSlot({ src, n, onPhotoClick }) {
       style={{ width: "100%", aspectRatio: "1/1.05", background: src ? `center/cover no-repeat url(${src})` : "#fff", borderTop: src ? "none" : "1px solid #f0f0f0", borderBottom: src ? "none" : "1px solid #f0f0f0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", cursor: src ? "zoom-in" : "default", position: "relative" }}
     >
       {!src && (
-        <>
-          <svg width="62" height="62" viewBox="0 0 24 24" fill="none" stroke="#d2d2d2" strokeWidth="1.4" style={{ marginBottom: 4 }}>
-            <circle cx="12" cy="8" r="4" />
-            <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
-          </svg>
-          <span style={{ fontFamily: sans, fontSize: 30, fontWeight: 800, letterSpacing: "2px", color: "#cfcfcf" }}>PHOTO</span>
-        </>
+        <span style={{ fontFamily: serif, fontSize: 34, fontWeight: 800, letterSpacing: "1px", color: "#d4d4d4", fontVariationSettings: "'opsz' 60" }}>photo</span>
       )}
       {src && (
         <span style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,.5)", color: "#fff", fontSize: 11, padding: "3px 8px", borderRadius: 20 }}>
@@ -619,12 +662,8 @@ function MiniDemo() {
     ],
   };
   const MiniPhoto = () => (
-    <div style={{ width: "100%", aspectRatio: "1/1", background: "#fff", borderTop: "1px solid #f0f0f0", borderBottom: "1px solid #f0f0f0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#d2d2d2" strokeWidth="1.4" style={{ marginBottom: 2 }}>
-        <circle cx="12" cy="8" r="4" />
-        <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
-      </svg>
-      <span style={{ fontFamily: sans, fontSize: 13, fontWeight: 800, letterSpacing: "1px", color: "#cfcfcf" }}>PHOTO</span>
+    <div style={{ width: "100%", aspectRatio: "1/1", background: "#fff", borderTop: "1px solid #f0f0f0", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <span style={{ fontFamily: serif, fontSize: 15, fontWeight: 800, letterSpacing: ".5px", color: "#d4d4d4", fontVariationSettings: "'opsz' 60" }}>photo</span>
     </div>
   );
   const Body = () => (
